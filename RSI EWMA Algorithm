@@ -1,0 +1,80 @@
+"""
+This algorithm calculates the Relative Strength Index (RSI) for growth stocks I picked out over
+a specified window length. The mean and weighted mean (exponential moving average)
+are calculated. The weighted mean is compared with the actual RSI value of the stock
+to determine when a RSI crossover occurs.
+"""
+
+import numpy as np
+import pandas as pd
+import talib
+
+# Setup our variables
+def initialize(context):
+    context.assets = [sid(351), sid(5121), sid(62), sid(50713), sid(4221), sid(22009), sid(49610), sid(47975), sid(1131), sid(45815), sid(49222), sid(34395), sid(45847), sid(24)] # stock that I want to backtest (AMD, ABT, GOOS, KEY, SPYG, SQ, BST, BSX, TWTR, TDOC, LULU, CHGG, APPL)
+    
+    
+    
+    # Rebalance every day, 30 minutes hour after market open on Monday.
+    schedule_function(my_rebalance,
+                      date_rules.every_day(),
+                      time_rules.market_open(minutes=30))
+     
+    # Record tracking variables at the end of each day.
+    schedule_function(my_record_vars, 
+                      date_rules.every_day(), 
+                      time_rules.market_close())
+    
+    # Set commission to zero for testing purposes
+    set_commission(commission.PerTrade(cost=0))
+
+
+def my_rebalance(context, data):
+    # Window length
+    window = 14
+    
+    for stock in context.assets:
+        # Load historical data for the stock
+        hist = data.history(stock, 'price', 24, '1d')
+    
+        # Calculate RSI moving average
+        rsi = talib.RSI(hist, timeperiod=window)
+        context.rsi_current = rsi[-1] # Get most recent RSI of the stock
+        context.rsi_mean = np.nanmean(rsi) 
+    
+        # Calculate RSI expotential weighted moving average(EWMA)
+        center_of_mass = (window - 1) / 2
+        context.rsi_ewma = pd.ewma(rsi, com=center_of_mass, ignore_na=True)[-1]
+    
+        # Calculate rsi moving average crossover with weighted average
+        rsi_crossover = context.rsi_current - context.rsi_ewma
+ 
+    
+        # Grab portfolio information
+        current_position = context.portfolio.positions[stock].amount
+        cash = context.portfolio.cash
+    
+        
+        # RSI > RSI_mean (long position) if RSI is greater than 80, or less than 60 ~ trending positive
+        if context.rsi_ewma > 80 and data.can_trade(stock):
+            log.info("Sell.")
+            order_target_percent(stock, 0)
+        elif rsi_crossover > 0 and data.can_trade(stock) and context.rsi_current < 60:
+            log.info("Buy.")
+            order_target_percent(stock, .0714)
+        # RSI < RSI_mean (short position) if RSI is less than 30 ~ trending negative
+        elif context.rsi_ewma < 30 and data.can_trade(stock):
+            log.info("Pray")
+            order_target_percent(stock, .0714)
+     
+    
+ 
+def my_record_vars(context, data):
+    """
+    Plot variables at the end of each day.
+    """
+    
+    record(
+        stock_rsi=context.rsi_current,
+        stock_rsi_ewma=context.rsi_ewma,
+    )
